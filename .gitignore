@@ -1,0 +1,24 @@
+# Environment Variables
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Database
+*.db
+*.sqlite
+
+# OS specific
+.DS_Store
+
+# Tests
+tests/
+
+# Internal Docs
+docs/

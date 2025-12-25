@@ -1,0 +1,24 @@
+# AWS-Brief Filtering Rules
+# Rename this file to 'filters.yaml' to enable filtering.
+# By default (if this file is missing), ALL news items are notified.
+
+rules:
+  # Example 1: Ignore GovCloud updates (Noise reduction)
+  - name: "Suppress GovCloud"
+    match:
+      title_regex: ".*GovCloud.*"
+      # You can also match by existing tags/categories if available
+    action: IGNORE  # Saved to DB but marked as Read. Excluded from Digest.
+
+  # Example 2: Digest Only for minor updates (De-clutter Slack)
+  - name: "Minor Instance Updates"
+    match:
+      title_regex: ".*Instance Type.*"
+    action: DIGEST_ONLY # Saved to DB, marked as Read (no Slack), but INCLUDED in Weekly Digest.
+
+  # Example 3: Critical Security (Priority Routing - Future Feature)
+  # Currently overrides action to ensure notification
+  - name: "Critical CVEs"
+    match:
+      title_regex: ".*CVE-\d+.*"
+    action: NOTIFY # Default behavior, ensures it is processed immediately.
