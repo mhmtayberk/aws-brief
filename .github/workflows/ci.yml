@@ -31,9 +31,9 @@ jobs:
       - name: Syntax validation
         run: |
           python -m py_compile src/core/*.py
+          python -m py_compile src/engines/*.py
           python -m py_compile src/notify/*.py
           python -m py_compile src/utils/*.py
-          python -m py_compile src/ai/*.py
       
       - name: Import tests
         run: |

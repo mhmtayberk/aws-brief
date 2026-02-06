@@ -9,7 +9,8 @@ services:
       - OLLAMA_HOST=http://ollama:11434
     depends_on:
       - ollama
-    command: ["python", "main.py", "--help"]
+    command: ["./entrypoint.sh", "daemon"]
+    restart: unless-stopped
 
   ollama:
     image: ollama/ollama:latest
