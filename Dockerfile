@@ -16,21 +16,29 @@ WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV PATH="/root/.local/bin:$PATH"
 
-# Copy installed packages from builder
-COPY --from=builder /root/.local /root/.local
+# Create non-root user first
+RUN useradd -m appuser
+
+# Copy installed packages from builder to appuser's home
+COPY --from=builder /root/.local /home/appuser/.local
+
+# Set PATH for appuser
+ENV PATH="/home/appuser/.local/bin:$PATH"
 
 # Copy source code
 COPY . .
 
-# Copy entrypoint and ensure it's executable (before switching to non-root user)
+# Copy entrypoint and ensure it's executable
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
 
-# Create non-root user for security
-RUN useradd -m appuser && chown -R appuser:appuser /app
+# Change ownership to appuser
+RUN chown -R appuser:appuser /app
+
+# Switch to non-root user
 USER appuser
 
 ENTRYPOINT ["./entrypoint.sh"]
 CMD ["--help"]
+
