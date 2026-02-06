@@ -13,7 +13,7 @@ class OpenAIEngine(BaseEngine):
     """
     AI Engine for OpenAI API.
     """
-    def __init__(self, model: str = "gpt-3.5-turbo"):
+    def __init__(self, model: str = "gpt-4o-mini"):
         if not OpenAI:
              raise ImportError("openai library not installed.")
              
@@ -27,29 +27,15 @@ class OpenAIEngine(BaseEngine):
     def summarize(self, text: str) -> str:
         try:
             logger.info(f"Summarizing text with OpenAI model: {self.model}")
+            
+            # Use centralized prompts
+            from src.utils.prompts import get_system_prompt, get_summarize_prompt
+            
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {
-                        "role": "system", 
-                        "content": f"You are a Senior Cloud Architect & Security Analyst. Output Language: {settings.SUMMARY_LANGUAGE}. Format: Markdown."
-                    },
-                    {
-                        "role": "user", 
-                        "content": f"""
-                        Analyze this AWS update:
-                        
-                        Instructions:
-                        1. Title: Punchy 5-8 words.
-                        2. The "What": Technical explanation.
-                        3. The "Why": Value/Impact.
-                        4. Impact Level: [CRITICAL/HIGH/MEDIUM/LOW/INFO].
-                        5. Action Required: Yes for upgrade/patch, No otherwise.
-
-                        Text:
-                        {text}
-                        """
-                    }
+                    {"role": "system", "content": get_system_prompt()},
+                    {"role": "user", "content": get_summarize_prompt(text)}
                 ]
             )
             return response.choices[0].message.content

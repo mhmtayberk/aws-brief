@@ -28,24 +28,15 @@ class GeminiEngine(BaseEngine):
         try:
             logger.info(f"Summarizing text with Google Gemini model: {self.model_name}")
             
-            prompt = f"""
-            Role: Senior Cloud Architect
-            Output Language: {settings.SUMMARY_LANGUAGE}
+            # Use centralized prompts
+            from src.utils.prompts import get_system_prompt, get_summarize_prompt
             
-            Analyze this AWS update:
-            1. Title (Punchy)
-            2. The What (Technical)
-            3. The Why (Impact)
-            4. Impact Level [CRITICAL/HIGH/MEDIUM/LOW]
-            5. Action Required (Yes/No)
-
-            Text:
-            {text}
-            """
+            # Combine system and user prompts for Gemini
+            full_prompt = f"{get_system_prompt()}\n\n{get_summarize_prompt(text)}"
             
             response = self.client.models.generate_content(
                 model=self.model_name, 
-                contents=prompt
+                contents=full_prompt
             )
             return response.text
         except Exception as e:

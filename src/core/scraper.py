@@ -4,6 +4,7 @@ import requests
 import random
 import time
 from typing import List, Dict, Any
+from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from src.utils.config import settings
 from datetime import datetime
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 class FeedScraper:
     """
-    Secure RSS/Atom Feed Scraper.
+    Secure RSS/Atom Feed Scraper with SSRF protection and retry logic.
     """
     USER_AGENTS = [
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -21,34 +22,56 @@ class FeedScraper:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/119.0",
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     ]
-    TIMEOUT = 30  # Seconds
+    TIMEOUT = 30
+    ALLOWED_DOMAINS = ["aws.amazon.com", "amazon.com"]
+    MAX_RETRIES = 3
 
     def __init__(self):
         self.session = requests.Session()
-        # Initial random UA
         self.session.headers.update({"User-Agent": random.choice(self.USER_AGENTS)})
+
+    def _validate_url(self, url: str) -> bool:
+        """Validate URL against whitelist to prevent SSRF attacks."""
+        try:
+            parsed = urlparse(url)
+            domain = parsed.netloc.lower()
+            return any(domain == allowed or domain.endswith(f".{allowed}") 
+                      for allowed in self.ALLOWED_DOMAINS)
+        except Exception:
+            return False
 
     def fetch(self, url: str) -> str:
         """
-        Fetch feed content from URL with stealth mechanics.
+        Fetch feed content with URL validation and retry logic.
         """
-        try:
-            # 1. Rotate User-Agent per request
-            ua = random.choice(self.USER_AGENTS)
-            self.session.headers.update({"User-Agent": ua})
-            
-            # 2. Add Random Jitter (1.5s to 4.0s) to mimic human usage & avoid rate limits
-            sleep_time = random.uniform(1.5, 4.0)
-            logger.debug(f"Sleeping {sleep_time:.2f}s before fetching {url}...")
-            time.sleep(sleep_time)
+        if not self._validate_url(url):
+            raise ValueError(f"URL not in whitelist: {url}")
+        
+        last_exception = None
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                ua = random.choice(self.USER_AGENTS)
+                self.session.headers.update({"User-Agent": ua})
+                
+                sleep_time = random.uniform(1.5, 4.0)
+                logger.debug(f"Sleeping {sleep_time:.2f}s before fetching {url}...")
+                time.sleep(sleep_time)
 
-            logger.info(f"Fetching feed: {url}")
-            response = self.session.get(url, timeout=self.TIMEOUT)
-            response.raise_for_status()
-            return response.text
-        except requests.RequestException as e:
-            logger.error(f"Failed to fetch {url}: {e}")
-            raise
+                logger.info(f"Fetching feed: {url}")
+                response = self.session.get(url, timeout=self.TIMEOUT)
+                response.raise_for_status()
+                return response.text
+                
+            except requests.RequestException as e:
+                last_exception = e
+                if attempt < self.MAX_RETRIES - 1:
+                    wait_time = 2 ** attempt
+                    logger.warning(f"Fetch failed (attempt {attempt + 1}/{self.MAX_RETRIES}), retrying in {wait_time}s: {e}")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"Failed to fetch {url} after {self.MAX_RETRIES} attempts: {e}")
+        
+        raise last_exception
 
     def parse(self, content: str) -> List[Dict[str, Any]]:
         """

@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: SecretStr | None = Field(None, env="ANTHROPIC_API_KEY")
     GOOGLE_API_KEY: SecretStr | None = Field(None, env="GOOGLE_API_KEY")
     GROQ_API_KEY: SecretStr | None = Field(None, env="GROQ_API_KEY")
+    MISTRAL_API_KEY: SecretStr | None = Field(None, env="MISTRAL_API_KEY")
+    DEEPSEEK_API_KEY: SecretStr | None = Field(None, env="DEEPSEEK_API_KEY")
 
     # Defaults for Automation
     DEFAULT_AI_ENGINE: str = Field("ollama", env="DEFAULT_AI_ENGINE")
@@ -24,10 +26,21 @@ class Settings(BaseSettings):
     DEFAULT_NOTIFY_CHANNELS: str = Field("slack", env="DEFAULT_NOTIFY_CHANNELS")
     SUMMARY_LANGUAGE: str = Field("English", env="SUMMARY_LANGUAGE")
     
+    # AI Rate Limiting
+    AI_RATE_LIMIT_CALLS: int = Field(50, env="AI_RATE_LIMIT_CALLS")
+    AI_RATE_LIMIT_PERIOD: int = Field(60, env="AI_RATE_LIMIT_PERIOD")
+    AI_MAX_RETRIES: int = Field(3, env="AI_MAX_RETRIES")
+    AI_RETRY_DELAY: int = Field(2, env="AI_RETRY_DELAY")
+    
     # Notifications
     SLACK_WEBHOOK_URL: SecretStr | None = Field(None, env="SLACK_WEBHOOK_URL")
     TEAMS_WEBHOOK_URL: SecretStr | None = Field(None, env="TEAMS_WEBHOOK_URL")
     DISCORD_WEBHOOK_URL: SecretStr | None = Field(None, env="DISCORD_WEBHOOK_URL")
+    TELEGRAM_BOT_TOKEN: SecretStr | None = Field(None, env="TELEGRAM_BOT_TOKEN")
+    TELEGRAM_CHAT_ID: str | None = Field(None, env="TELEGRAM_CHAT_ID")
+    WEBHOOK_URL: str | None = Field(None, env="WEBHOOK_URL")
+    WEBHOOK_SECRET: SecretStr | None = Field(None, env="WEBHOOK_SECRET")
+    MATTERMOST_WEBHOOK_URL: str | None = Field(None, env="MATTERMOST_WEBHOOK_URL")
     
     # SMTP Settings for Email
     SMTP_HOST: str | None = Field(None, env="SMTP_HOST")

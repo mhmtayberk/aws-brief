@@ -4,6 +4,9 @@ from .slack import SlackNotifier
 from .email import EmailNotifier
 from .teams import TeamsNotifier
 from .discord import DiscordNotifier
+from .telegram import TelegramNotifier
+from .webhook import WebhookNotifier
+from .mattermost import MattermostNotifier
 
 class NotificationFactory:
     """
@@ -21,4 +24,10 @@ class NotificationFactory:
                 notifiers.append(TeamsNotifier())
             elif channel.lower() == "discord":
                 notifiers.append(DiscordNotifier())
+            elif channel.lower() == "telegram":
+                notifiers.append(TelegramNotifier())
+            elif channel.lower() == "webhook":
+                notifiers.append(WebhookNotifier())
+            elif channel.lower() == "mattermost":
+                notifiers.append(MattermostNotifier())
         return notifiers

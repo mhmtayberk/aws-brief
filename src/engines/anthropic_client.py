@@ -13,7 +13,7 @@ class AnthropicEngine(BaseEngine):
     """
     AI Engine for Anthropic (Claude) API.
     """
-    def __init__(self, model: str = "claude-3-opus-20240229"):
+    def __init__(self, model: str = "claude-3-5-sonnet-20241022"):
         if not Anthropic:
              raise ImportError("anthropic library not installed. Install with `pip install anthropic`")
              
@@ -27,18 +27,22 @@ class AnthropicEngine(BaseEngine):
     def summarize(self, text: str) -> str:
         try:
             logger.info(f"Summarizing text with Anthropic model: {self.model}")
+            
+            # Use centralized prompts
+            from src.utils.prompts import get_system_prompt, get_summarize_prompt
+            
             message = self.client.messages.create(
                 model=self.model,
-                max_tokens=1000,
+                max_tokens=1500,
                 temperature=0,
-                system=f"You are a Senior Cloud Architect. Analyze the update for a technical audience in {settings.SUMMARY_LANGUAGE}. Provide: Title, What, Why, Impact Level [CRITICAL/HIGH/MEDIUM/LOW], and Action Required.",
+                system=get_system_prompt(),
                 messages=[
                     {
                         "role": "user",
                         "content": [
                             {
                                 "type": "text",
-                                "text": f"Summarize this:\n\n{text}"
+                                "text": get_summarize_prompt(text)
                             }
                         ]
                     }

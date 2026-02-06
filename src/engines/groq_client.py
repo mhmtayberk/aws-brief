@@ -27,16 +27,14 @@ class GroqEngine(BaseEngine):
     def summarize(self, text: str) -> str:
         try:
             logger.info(f"Summarizing text with Groq model: {self.model}")
+            
+            # Use centralized prompts
+            from src.utils.prompts import get_system_prompt, get_summarize_prompt
+            
             chat_completion = self.client.chat.completions.create(
                 messages=[
-                    {
-                        "role": "system",
-                        "content": f"You are a Senior Cloud Architect. Output Language: {settings.SUMMARY_LANGUAGE}. Format: Markdown. Structure: Title, What, Why, Impact Level, Action Required."
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Summarize this:\n\n{text}",
-                    }
+                    {"role": "system", "content": get_system_prompt()},
+                    {"role": "user", "content": get_summarize_prompt(text)}
                 ],
                 model=self.model,
             )

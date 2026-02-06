@@ -24,12 +24,13 @@ COPY --from=builder /root/.local /root/.local
 # Copy source code
 COPY . .
 
+# Copy entrypoint and ensure it's executable (before switching to non-root user)
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
+
 # Create non-root user for security
 RUN useradd -m appuser && chown -R appuser:appuser /app
 USER appuser
-
-# Copy entrypoint
-COPY entrypoint.sh .
 
 ENTRYPOINT ["./entrypoint.sh"]
 CMD ["--help"]

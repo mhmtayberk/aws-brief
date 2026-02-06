@@ -31,8 +31,12 @@ def init_db():
     try:
         db_manager._init_db()
         typer.echo("Database initialized successfully.")
+    except (IOError, OSError) as e:
+        typer.echo(f"Database initialization failed: {e}", err=True)
+        raise typer.Exit(1)
     except Exception as e:
-        typer.echo(f"Failed to initialize database: {e}")
+        typer.echo(f"Unexpected error during database initialization: {e}", err=True)
+        raise typer.Exit(1)
 
 @app.command()
 def scan(url: str = typer.Option(DEFAULT_FEED_URL, help="Feed URL to scan, or 'all' for all default feeds.")):
@@ -446,3 +450,392 @@ def send_digest(
 
 if __name__ == "__main__":
     app()
+
+# ============================================================================
+# Smart Digest Helper Functions
+# ============================================================================
+
+def _get_recent_items(days: int):
+    """
+    Get news items from the last N days.
+    
+    Args:
+        days: Number of days to look back
+        
+    Returns:
+        List of NewsItem objects
+    """
+    from datetime import datetime, timedelta
+    
+    db = db_manager.get_session()
+    try:
+        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        
+        items = db.query(NewsItem).filter(
+            NewsItem.published_at >= cutoff_date
+        ).order_by(NewsItem.published_at.desc()).all()
+        
+        return items
+    finally:
+        db.close()
+
+
+def _generate_smart_digest(items, engine_type: str, model: str, days: int = 7) -> str:
+    """
+    Generate AI-powered smart digest with categorization.
+    
+    Args:
+        items: List of news items
+        engine_type: AI engine to use
+        model: AI model name
+        days: Number of days for date range display
+        
+    Returns:
+        Formatted smart digest string
+    """
+    if not items:
+        return "No items to analyze."
+    
+    # Limit to 50 items to avoid token limits
+    if len(items) > 50:
+        logger.warning(f"Too many items ({len(items)}). Using first 50 for analysis.")
+        items = items[:50]
+    
+    # Prepare items summary for AI
+    items_text = ""
+    for i, item in enumerate(items, 1):
+        items_text += f"{i}. {item.title}\n"
+        if item.summary:
+            items_text += f"   Summary: {item.summary[:200]}...\n"
+        items_text += f"   Published: {item.published_at.strftime('%Y-%m-%d')}\n"
+        items_text += f"   Category: {item.tags or 'General'}\n\n"
+    
+    # AI Prompt
+    prompt = f"""Analyze these AWS updates and create a smart digest.
+
+Updates to analyze:
+{items_text}
+
+Instructions:
+1. Categorize each update into ONE of these categories:
+   - CRITICAL: Security patches, breaking changes, action required
+   - COST_OPTIMIZATION: Cost savings, efficiency improvements
+   - NEW_FEATURES: New services, features, capabilities
+   - GENERAL: Other updates
+
+2. For CRITICAL items, specify:
+   - Impact level (HIGH/MEDIUM/LOW)
+   - Required action
+   - Deadline (if applicable)
+
+3. For COST_OPTIMIZATION items, specify:
+   - Potential savings or benefit
+   - How to implement
+
+4. Format the output as:
+
+🚨 CRITICAL - Action Required (X items)
+[List critical items with details]
+
+💰 COST OPTIMIZATION (X opportunities)
+[List cost optimization items]
+
+✨ NEW FEATURES (X items)
+[List new features briefly]
+
+📌 SUMMARY
+Total Updates: X
+Critical Actions: X
+Cost Savings: X opportunities
+New Features: X
+
+Keep it concise and actionable. Use emojis for visual appeal.
+Language: {settings.SUMMARY_LANGUAGE}
+"""
+    
+    # Generate with AI
+    try:
+        ai_engine = EngineFactory.get_engine(engine_type, model)
+        digest = ai_engine.summarize(prompt)
+        
+        # Add header and footer
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=days)
+        
+        header = f"📊 AWS Brief - Smart Digest ({start_date.strftime('%b %d')}-{end_date.strftime('%b %d, %Y')})\n\n"
+        header += "━" * 60 + "\n\n"
+        
+        footer = "\n" + "━" * 60
+        
+        return header + digest + footer
+        
+    except Exception as e:
+        logger.error(f"Failed to generate smart digest with AI: {e}")
+        # Fallback to simple digest
+        return _generate_simple_digest_fallback(items)
+
+
+def _generate_simple_digest_fallback(items) -> str:
+    """
+    Fallback to simple digest if AI fails.
+    
+    Args:
+        items: List of news items
+        
+    Returns:
+        Simple formatted digest
+    """
+    digest = "📊 AWS Brief - Digest\n\n"
+    digest += "━" * 60 + "\n\n"
+    digest += "⚠️ Note: AI analysis unavailable. Showing simple list.\n\n"
+    
+    for i, item in enumerate(items, 1):
+        digest += f"{i}. {item.title}\n"
+        if item.summary:
+            summary_preview = item.summary[:200]
+            if len(item.summary) > 200:
+                summary_preview += "..."
+            digest += f"   {summary_preview}\n"
+        digest += f"   Published: {item.published_at.strftime('%Y-%m-%d')}\n"
+        digest += f"   URL: {item.url}\n\n"
+    
+    digest += "━" * 60 + "\n"
+    digest += f"Total Updates: {len(items)}\n"
+    
+    return digest
+
+
+# ============================================================================
+# Smart Digest Command
+# ============================================================================
+
+@app.command()
+def send_smart_digest(
+    days: int = typer.Option(7, help="Number of days to look back"),
+    channels: str = typer.Option(settings.DEFAULT_NOTIFY_CHANNELS, help="Comma-separated channels"),
+    engine: str = typer.Option(settings.DEFAULT_AI_ENGINE, help="AI engine to use"),
+    model: Optional[str] = typer.Option(settings.DEFAULT_AI_MODEL, help="AI model name")
+):
+    """
+    Send an AI-powered smart digest with categorization and prioritization.
+    
+    Categories items into:
+    - CRITICAL (action required)
+    - COST_OPTIMIZATION (savings opportunities)  
+    - NEW_FEATURES (relevant updates)
+    - GENERAL (other updates)
+    
+    Example:
+        python main.py send-smart-digest --days 7 --channels slack
+        python main.py send-smart-digest --days 14 --engine openai --model gpt-4
+    """
+    logger.info(f"Generating smart digest for last {days} days...")
+    typer.echo(f"🔍 Analyzing AWS updates from the last {days} days...")
+    
+    # 1. Get items from database
+    items = _get_recent_items(days)
+    
+    if not items:
+        typer.echo(f"No items found in the last {days} days.")
+        logger.info("No items to process for smart digest.")
+        return
+    
+    typer.echo(f"📊 Found {len(items)} items. Generating AI-powered analysis...")
+    
+    # 2. Generate smart digest using AI
+    target_model = model or settings.DEFAULT_AI_MODEL
+    smart_digest = _generate_smart_digest(items, engine, target_model, days)
+    
+    # 3. Send via notifiers
+    notifiers = NotificationFactory.get_notifiers(channels.split(","))
+    
+    success_count = 0
+    for notifier in notifiers:
+        try:
+            success = notifier.send(
+                title=f"AWS Brief - Smart Digest ({days} days)",
+                message=smart_digest,
+                url="",  # No specific URL for digest
+                category="Smart Digest"
+            )
+            if success:
+                logger.info(f"Smart digest sent via {type(notifier).__name__}")
+                success_count += 1
+            else:
+                logger.error(f"Failed to send smart digest via {type(notifier).__name__}")
+        except Exception as e:
+            logger.error(f"Error sending smart digest via {type(notifier).__name__}: {e}")
+    
+    if success_count > 0:
+        typer.echo(f"✅ Smart digest sent successfully to {success_count} channel(s)!")
+    else:
+        typer.echo("❌ Failed to send smart digest to any channels.", err=True)
+        raise typer.Exit(1)
+
+
+@app.command()
+def export(
+    format: str = typer.Option("json", help="Export format: json, csv, markdown, txt"),
+    output: str = typer.Option("export", help="Output filename (without extension)"),
+    days: int = typer.Option(7, help="Export items from last N days"),
+    filter_tags: str = typer.Option(None, help="Filter by tags (comma-separated)")
+):
+    """
+    Export news items to various formats (JSON, CSV, Markdown, TXT).
+    """
+    from datetime import datetime, timedelta
+    import json
+    import csv
+    
+    try:
+        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        
+        db = db_manager.get_session()
+        query = db.query(NewsItem).filter(NewsItem.published_at >= cutoff_date)
+        
+        if filter_tags:
+            tags_list = [tag.strip() for tag in filter_tags.split(",")]
+            from sqlalchemy import or_
+            tag_filters = [NewsItem.tags.like(f"%{tag}%") for tag in tags_list]
+            query = query.filter(or_(*tag_filters))
+        
+        items = query.order_by(NewsItem.published_at.desc()).all()
+        
+        if not items:
+            typer.echo("❌ No items to export")
+            return
+        
+        filename = f"{output}.{format}"
+        
+        if format == "json":
+            data = [
+                {
+                    "id": item.id,
+                    "title": item.title,
+                    "url": item.url,
+                    "content": item.content,
+                    "summary": item.summary,
+                    "published_at": item.published_at.isoformat(),
+                    "created_at": item.created_at.isoformat(),
+                    "tags": item.tags,
+                    "is_notified": item.is_notified
+                }
+                for item in items
+            ]
+            with open(filename, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        
+        elif format == "csv":
+            with open(filename, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["ID", "Title", "URL", "Summary", "Published At", "Tags", "Notified"])
+                for item in items:
+                    writer.writerow([
+                        item.id,
+                        item.title,
+                        item.url,
+                        item.summary or "",
+                        item.published_at.isoformat(),
+                        item.tags or "",
+                        "Yes" if item.is_notified else "No"
+                    ])
+        
+        elif format == "markdown":
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write(f"# AWS-Brief Export\n\n")
+                f.write(f"**Period**: Last {days} days\n")
+                f.write(f"**Total Items**: {len(items)}\n")
+                f.write(f"**Generated**: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}\n\n")
+                f.write("---\n\n")
+                
+                for item in items:
+                    f.write(f"## {item.title}\n\n")
+                    f.write(f"**Published**: {item.published_at.strftime('%Y-%m-%d %H:%M')} UTC\n")
+                    f.write(f"**Tags**: {item.tags or 'None'}\n")
+                    f.write(f"**Notified**: {'Yes' if item.is_notified else 'No'}\n\n")
+                    if item.summary:
+                        f.write(f"### Summary\n\n{item.summary}\n\n")
+                    f.write(f"[Read Full Article]({item.url})\n\n")
+                    f.write("---\n\n")
+        
+        elif format == "txt":
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write(f"AWS-Brief Export\n")
+                f.write(f"Period: Last {days} days\n")
+                f.write(f"Total Items: {len(items)}\n")
+                f.write(f"Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}\n")
+                f.write("=" * 80 + "\n\n")
+                
+                for i, item in enumerate(items, 1):
+                    f.write(f"{i}. {item.title}\n")
+                    f.write(f"   Published: {item.published_at.strftime('%Y-%m-%d %H:%M')} UTC\n")
+                    f.write(f"   Tags: {item.tags or 'None'}\n")
+                    f.write(f"   Notified: {'Yes' if item.is_notified else 'No'}\n")
+                    if item.summary:
+                        summary_lines = item.summary.split("\n")
+                        f.write(f"   Summary:\n")
+                        for line in summary_lines:
+                            f.write(f"     {line}\n")
+                    f.write(f"   URL: {item.url}\n")
+                    f.write("\n" + "-" * 80 + "\n\n")
+        
+        else:
+            typer.echo(f"❌ Unsupported format: {format}. Use: json, csv, markdown, txt")
+            return
+        
+        typer.echo(f"✅ Exported {len(items)} items to {filename}")
+        db.close()
+        
+    except Exception as e:
+        typer.echo(f"❌ Export failed: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@app.command()
+def cleanup(
+    days: int = typer.Option(30, help="Delete items older than N days"),
+    dry_run: bool = typer.Option(False, help="Show what would be deleted without deleting")
+):
+    """
+    Clean up old news items to save disk space.
+    """
+    from datetime import datetime, timedelta
+    from sqlalchemy import text
+    
+    try:
+        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        
+        db = db_manager.get_session()
+        old_items = db.query(NewsItem).filter(NewsItem.published_at < cutoff_date).all()
+        
+        if not old_items:
+            typer.echo(f"✅ No items older than {days} days found")
+            return
+        
+        if dry_run:
+            typer.echo(f"🔍 Would delete {len(old_items)} items older than {days} days:")
+            for item in old_items[:10]:
+                typer.echo(f"  - {item.title[:60]}... ({item.published_at.strftime('%Y-%m-%d')})")
+            if len(old_items) > 10:
+                typer.echo(f"  ... and {len(old_items) - 10} more items")
+            typer.echo(f"\n💡 Run without --dry-run to actually delete")
+        else:
+            # Delete items
+            for item in old_items:
+                db.delete(item)
+            db.commit()
+            typer.echo(f"✅ Deleted {len(old_items)} items older than {days} days")
+            
+            # Vacuum database to reclaim space
+            try:
+                db.execute(text("VACUUM"))
+                typer.echo("✅ Database vacuumed (disk space reclaimed)")
+            except Exception as e:
+                logger.warning(f"Could not vacuum database: {e}")
+        
+        db.close()
+        
+    except Exception as e:
+        typer.echo(f"❌ Cleanup failed: {e}", err=True)
+        raise typer.Exit(1)
+
